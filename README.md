@@ -12,17 +12,7 @@ This repository starts from source snapshots of the original worktrees. Checkpoi
 logs, generated outputs, and historical notebooks with embedded outputs are excluded.
 Original source revisions are recorded in the import commit messages.
 
-The legacy comparison checks (`tests/source_contract.py`, `tests/compare_legacy.py`,
-and the legacy parity section of `tests/generation.py`) additionally need original
-commit `33b4277437db35929c5468feecff76b2cf224ac2`. To run them, import that history
-locally from an existing original checkout first:
-
-```bash
-git fetch /path/to/original/ziptok 33b4277437db35929c5468feecff76b2cf224ac2
-```
-
-The imported legacy history is only for local verification; do not push it to this
-source-only repository. Training and sampling do not require that history.
+The retained tests run without importing the original Git history or Lightning.
 
 A minimal PyTorch implementation of the existing `cls-init-cos` baseline. Stage 1 retains DINO CLS token adaptation, cosine regularization, and the MMDiT flow decoder. Stage 2 adds the original class-conditioned 1D token Transformer over frozen projected tokens. Both use one native training loop; no Lightning runtime, video models, notebooks, or alternative regularizers.
 
@@ -57,6 +47,95 @@ sbatch scripts/jupiter.sh trainer_params.max_steps=100000 data.params.tar_base=/
 ```
 
 The script defaults to one node, four GPUs, account `lift-virg`, and 30 minutes. Override allocation/time through `sbatch`. It starts one torchrun launcher per node. The job is independent of the local connection once submitted. USR1/TERM requests a checkpoint at the next complete optimizer update.
+
+## Stage-1 iMF decoder
+
+`imf` adds the **boundary-velocity variant** of improved MeanFlow
+([paper, Eq. 12 and Algorithm 1](https://arxiv.org/abs/2512.02012)) to the
+existing MMDiT-XL/2 decoder. It retains the SiT warm start, frozen TAESD,
+DINO backbone with trainable CLS embedding and projection, frozen DINO teacher,
+cosine weight 0.1, optimizer and EMA behavior. The default FM config and stage-2
+generator are unchanged.
+
+```bash
+bash scripts/run.sh --config-name imf trainer_params.max_steps=100000 data.params.tar_base=/your/latent/dataset
+```
+
+Use the same arguments with `sbatch scripts/jupiter.sh` to submit on Jupiter.
+This is a new training run; an existing FM checkpoint is not an iMF checkpoint.
+The SiT initialization file loads before the new interval embedding is added;
+that embedding's output starts at zero. Resume an iMF run with `--config-name imf
+resume_checkpoint=/path/to/imf.ckpt` and the original data/architecture overrides.
+
+The model predicts average velocity `u(z,t,s,c)` between current time `t` and
+destination `s`, using this repository's convention **0=noise, 1=data** (the
+paper uses the opposite direction). Training uses `v=u(z,t,t,c)` as the JVP
+tangent, holds `s` and conditioning `c` fixed, and minimizes
+`mean((u - (s-t)*stopgrad(du/dt) - (data-noise))**2)`.
+The total derivative is `du/dt = partial_t u + partial_z u * v`.
+Half the samples have zero-length intervals in expectation, providing ordinary
+FM supervision for the boundary velocity. Times use logit-normal sampling with
+mean +0.4 and std 1.0, equivalent to the reference's -0.4 after time reversal.
+
+This controlled adaptation uses the paper's no-auxiliary-head formulation and
+plain MSE, preserving the baseline decoder/cosine loss scale. It does **not**
+reproduce the complete iMF benchmark recipe (adaptive loss weighting, auxiliary
+velocity head, learned flexible CFG, and replacement of adaLN by multi-token
+conditioning). No pretrained iMF class-conditional weights or quality claims are
+transferred to this DINO-conditioned reconstruction task.
+
+Reconstruction defaults to **one decoder evaluation**:
+`latent = noise + u(noise, 0, 1, projected_token)`, then one TAESD decode.
+Inference needs no JVP or teacher evaluations. Fixed tokens and noise give
+deterministic outputs; changing noise permits different reconstructions.
+For a few-step comparison set `trainer_module.params.sample_kwargs.num_steps=2`
+(or `4`); each interval costs one decoder evaluation. More steps are not
+guaranteed to improve quality. Validation `val/loss` is the boundary FM diagnostic
+`u(z,t,t)`, not the interval training objective; rFID/SSIM still evaluate the
+configured reconstruction step count.
+
+The decoder runs eagerly with explicit attention for forward-mode autodiff;
+its `compile` option must remain false. JVP and its model-predicted tangent are
+computed in FP32 without a backward graph. A separate forward uses the training
+autocast setting and preserves gradients into the CLS/projection. This costs more
+training compute than ordinary FM. Tokenizer compilation retains the baseline
+setting. Optional `+model.params.net_cfg.params.use_checkpointing=true` checkpoints
+the gradient-enabled decoder pass only.
+
+Offline checks in the existing container (synthetic data, not ImageNet quality):
+
+```bash
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/imf.py
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/smoke.py --imf
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/smoke.py --imf --ddp
+```
+
+These passed on CPU, including BF16, two-process DDP and save/resume. The checks
+use a reduced real MMDiT and synthetic encoder/AE fixtures. GPU execution,
+XL memory/throughput and ImageNet reconstruction quality have not been measured.
+
+### Baseline-matched Jupiter run
+
+`imf_jupiter` matches the completed **300,000-update reconstruction** baseline
+(job 1965038); the baseline's 100,000-update budget applies to stage-2 generation.
+It uses the same SiT/TAESD files, ImageNet latent shards, seed 2023, per-GPU batch
+32, global batch 128 on four GH200s, LR 1e-4, 2,000-update warmup, EMA 0.9995,
+cosine weight 0.1, and 1,024 validation images every 5,000 updates.
+The necessary interval embedding adds 1,624,320 parameters while retaining the
+28-layer, width-1152, 16-head, patch-2 backbone. Its initialization preserves the
+RNG state so the tokenizer/projection initialization matches the same-seed baseline.
+The objective/interval sampling, eager JVP implementation and 1-step validation
+are the intentional differences.
+
+`scripts/imf_jupiter.sh` runs a frozen source copy from an explicit run directory,
+with the existing offline model caches. Submit it as that directory's `job.sh`,
+passing the directory as its first argument and an absolute Slurm output path.
+It runs CUDA sanity checks before training. Each allocation is limited to 12 hours,
+with a graceful checkpoint after 41,400 seconds; successful finite segments
+automatically submit dependent continuations until 300,000 total updates.
+Failures are not retried automatically. The continuation cap is eight allocations,
+matching the baseline's cap; reaching the cap preserves the latest checkpoint.
+`recon.json` records progress and `jobs.tsv` records continuation job IDs.
 
 ## Stage-2 generation
 
@@ -145,7 +224,7 @@ Scope is the selected infinite/repeating WebDataset configuration. Other archite
 
 ## Reconstruction verification
 
-In `jenv-video.sif`, the following passed with tiny offline encoders/AE and the real reduced-size MMDiT, tokenizer projection and flow implementation:
+During the original migration, the following passed in `jenv-video.sif` with tiny offline encoders/AE and the real reduced-size MMDiT, tokenizer projection and flow implementation:
 
 - Exact equality (`rtol=0`, `atol=0`) against Lightning 2.5.0.post0 for initialization, losses, gradients, every parameter/EMA tensor, AdamW state, warmup state, reconstruction images and validation outputs.
 - FP32 on CPU and BF16 on GH200, with accumulation 1 and 2; GPU checks also cover a continuous RNG stream across training/validation.
@@ -157,22 +236,12 @@ These establish controlled short-run equivalence, not bitwise identity across di
 Run the native checks without Lightning:
 
 ```bash
-apptainer exec --nv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/source_contract.py
 apptainer exec --nv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/smoke.py
 apptainer exec /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/smoke.py --ddp
 ```
 
-For the legacy comparison only, install Lightning into a temporary directory outside this project:
-
-```bash
-apptainer exec /e/home/jusers/gui2/jupiter/jenv-video.sif python -m pip install --no-deps \
-  --target /tmp/reptok-parity-deps lightning==2.5.0.post0 pytorch-lightning==2.5.0.post0
-apptainer exec --nv --env PYTHONPATH=/tmp/reptok-parity-deps \
-  /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/compare_legacy.py \
-  --device gpu --precision bf16-mixed --continuous-rng
-```
-
-The comparison extracts the old implementation from Git into a temporary directory; legacy code and Lightning are not shipped as training dependencies.
+The one-off source/Lightning parity scripts have been removed after migration;
+the retained smoke tests exercise the current training, validation and resume paths.
 
 Stage-2 checks (synthetic metrics, no ImageNet training):
 
@@ -181,7 +250,7 @@ apptainer exec --cleanenv --nv /e/home/jusers/gui2/jupiter/jenv-video.sif python
 apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/generation.py --ddp
 ```
 
-These compare the token Transformer with the old source, verify frozen codec weights,
+These verify frozen codec weights,
 exercise actual small DINO + TAESD constructors with external loading blocked, and
 remove the original recon checkpoint before restoring gen from another directory.
 

@@ -110,6 +110,19 @@ def build_reptok(**params):
         trainer.ImageMetricTracker = original
 
 
+def imf_params():
+    params = model_params()
+    params.flow_cfg = {
+        'target': 'ldm.imf.ImprovedMeanFlow', 'params': {
+            'net_cfg': params.flow_cfg.params.net_cfg,
+            'fm_ratio': 0.5, 'time_mean': 0.4, 'time_std': 1.0,
+        },
+    }
+    params.flow_cfg.params.net_cfg.target = 'ldm.models.transformer.imf_mmdit.IMFMMDiT'
+    params.sample_kwargs.num_steps = 1
+    return params
+
+
 class GenBatches(Batches):
     def __iter__(self):
         for batch in super().__iter__():

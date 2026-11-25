@@ -1,0 +1,10 @@
+defaults:
+  - config
+  - override model: imf-xl-2
+  - _self_
+
+name: imnet256/ziptok/imf-xl-2/cls/cos-sim_0.1
+trainer_module:
+  params:
+    sample_kwargs:
+      num_steps: 1

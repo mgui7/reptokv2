@@ -1,6 +1,5 @@
 """Generation smoke, frozen-codec checks, and relocation without original weights."""
 import argparse
-import importlib.util
 import os
 from pathlib import Path
 import runpy
@@ -19,7 +18,6 @@ sys.path.insert(0, str(ROOT))
 from fixtures import build_reptok, model_params, TinyMetricTracker
 from ldm.codec import FrozenCodec
 from ldm.generation import TokenGenerator
-from ldm.models.transformer.token_dit import OneDimensionalTransformer
 
 
 class FakeGenerationMetrics(TinyMetricTracker):
@@ -84,36 +82,9 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
         assert real_codec.decode(real_codec.encode(real_images), num_steps=2).shape == real_images.shape
         real_path.unlink()
 
-    # Verify reuse of DiT blocks leaves the original generator computation intact.
-    old_source = subprocess.check_output(['git', 'show', '33b4277:ldm/models/transformer/1d_mmdit.py'], cwd=ROOT, text=True)
-    (tmp / 'legacy_token.py').write_text(old_source)
-    spec = importlib.util.spec_from_file_location('legacy_token', tmp / 'legacy_token.py')
-    legacy = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(legacy)
     net_args = dict(num_channels=1, in_channels=32, hidden_size=32, depth=2,
                     num_heads=4, num_classes=3, class_dropout_prob=0.1, n_registers=1)
-    torch.manual_seed(5)
-    old_net = legacy.OneDimensionalTransformer(**net_args)
-    torch.manual_seed(5)
-    new_net = OneDimensionalTransformer(**net_args)
-    assert old_net.state_dict().keys() == new_net.state_dict().keys()
-    for key, value in old_net.state_dict().items():
-        torch.testing.assert_close(value, new_net.state_dict()[key], rtol=0, atol=0)
-    # Nonzero readout tests the actual Transformer path beyond zero initialization.
-    with torch.no_grad():
-        old_net.final_layer.linear.weight.normal_()
-    new_net.load_state_dict(old_net.state_dict())
-    x, t, labels = torch.randn(2, 1, 32), torch.rand(2), torch.tensor([0, 1])
-    torch.manual_seed(7)
-    old_out = old_net(x, t, y=labels)
-    torch.manual_seed(7)
-    new_out = new_net(x, t, y=labels)
-    torch.testing.assert_close(old_out, new_out, rtol=0, atol=0)
-    old_out.square().mean().backward()
-    new_out.square().mean().backward()
-    for a, b in zip(old_net.parameters(), new_net.parameters()):
-        if a.grad is not None:
-            torch.testing.assert_close(a.grad, b.grad, rtol=1e-5, atol=1e-6)
+    labels = torch.tensor([0, 1])
 
     recon = build_reptok(**model_params()).eval()
     recon_path = tmp / 'original-recon.ckpt'
@@ -184,6 +155,6 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
     for key, value in state['state_dict'].items():
         if key.startswith('codec.'):
             torch.testing.assert_close(value, resumed['state_dict'][key], rtol=0, atol=0)
-    print('GEN PASSED: original token weights/forward exact, gradients within FP32 tolerance (atol=1e-6, rtol=1e-5); frozen codec, CFG, training, validation, '
+    print('GEN PASSED: frozen codec, CFG, training, validation, '
           'resume and identical inference after removing recon and moving gen checkpoint;',
           args.backbone, 'two-process CPU DDP' if args.ddp else 'BF16 mixed precision')
