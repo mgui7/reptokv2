@@ -1,0 +1,56 @@
+defaults:
+  - _self_
+  - model: mmdit-xl-2
+  - tokenizer: cls
+  - data: imagenet256_latents
+  - autoencoder: tiny_ae
+  - lr_scheduler: constant
+  - model@prior: token-xl
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+name: mmd/joint-onestep-w01
+seed: 2023
+compile: true
+log_root: logs
+slurm_id: null
+load_weights: null
+load_weights_strict: true
+resume_checkpoint: null
+trainer_module:
+  target: ldm.mmd.MMDRepTok
+  params:
+    flow_cfg: ${model}
+    tokenizer_cfg: ${tokenizer}
+    prior_cfg: ${prior}
+    first_stage_cfg: ${autoencoder}
+    prior_logsnr_min: -10.0
+    prior_logsnr_max: 5.0
+    mmd_weight: 0.1
+    mmd_sigma: null
+    mmd_chunk: 1024
+    mmd_normalization_epsilon: 1e-6
+    prior_init_seed: 2023
+    lr: 1e-4
+    weight_decay: 0.0
+    ema_rate: 0.9995
+    lr_scheduler_cfg: ${lr_scheduler}
+    token_steps: 1
+    decoder_steps: 50
+    cfg_scale: 1.0
+    n_images_to_vis: 16
+trainer_params:
+  max_steps: -1
+  accumulate_grad_batches: 1
+  log_every_n_steps: 50
+  limit_val_batches: 16
+  val_check_interval: 5000
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  max_time_seconds: 41400
+checkpoint_params:
+  every_n_train_steps: 10000
+hydra:
+  output_subdir: null
+  run:
+    dir: .

@@ -75,6 +75,9 @@ def train_batch(module, batch, optimizer, scheduler, batch_idx, accumulation,
             optimizer.zero_grad(set_to_none=True)
         loss.backward()
     if step:
+        unwrapped = module.module if isinstance(module, DistributedDataParallel) else module
+        if hasattr(unwrapped, 'gradient_metrics') and (batch_idx + 1) % unwrapped.gradient_log_interval == 0:
+            metrics.update(unwrapped.gradient_metrics())
         if clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(
                 [p for p in module.parameters() if p.requires_grad], clip_norm, error_if_nonfinite=True,
@@ -121,6 +124,8 @@ def save_checkpoint(path, module, optimizer, scheduler, step, batch_step, config
             config=config, rng_states=states, latent_shape=module.latent_shape,
             validation_pending=validation_pending, format_version=1,
         )
+        if hasattr(module, 'best_validation'):
+            checkpoint['best_validation'] = dict(module.best_validation)
         if hasattr(module, 'export_codec_config'):
             checkpoint['codec_config'] = module.export_codec_config()
         path = Path(path)
@@ -140,4 +145,6 @@ def load_checkpoint(path, module, optimizer=None, scheduler=None, strict=True):
     if scheduler is not None:
         scheduler.load_state_dict(checkpoint['lr_schedulers'][0])
     module.latent_shape = checkpoint.get('latent_shape')
+    if 'best_validation' in checkpoint:
+        module.best_validation = dict(checkpoint['best_validation'])
     return checkpoint

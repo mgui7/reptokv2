@@ -1,0 +1,10 @@
+defaults:
+  - ul_posttrain
+  - _self_
+
+name: ul/posttrain-reptok-w3-frozen-time
+trainer_module:
+  params:
+    freeze_decoder_time_mlp: true
+trainer_params:
+  max_steps: 35000

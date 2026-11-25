@@ -86,7 +86,7 @@ def main(cfg: DictConfig):
     # Self-contained checkpoints construct their saved architecture without
     # reopening recon or model-initializer paths.
     source = cfg.resume_checkpoint or cfg.load_weights
-    if source and cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE'):
+    if source and cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE', 'ldm.ul.ULRepTok', 'ldm.fd.FDRepTok', 'ldm.mmd.MMDRepTok', 'ldm.ul_posttrain.ULPosttrainRepTok'):
         overrides = {key: cfg.trainer_module.params.get(key)
                      for key in ('token_grad_mode', 'token_loss_weight')}
         saved = torch.load(source, map_location='cpu', weights_only=False)
@@ -98,7 +98,7 @@ def main(cfg: DictConfig):
         cfg.trainer_module.params = OmegaConf.create(saved_params)
         del saved
     module = instantiate_from_config(cfg.trainer_module).to(device).train()
-    if cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE'):
+    if cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE', 'ldm.ul.ULRepTok', 'ldm.fd.FDRepTok', 'ldm.mmd.MMDRepTok', 'ldm.ul_posttrain.ULPosttrainRepTok'):
         cfg.trainer_module.params = OmegaConf.create(module.hyper_parameters)
     config = OmegaConf.to_container(cfg, resolve=True)
     if device.type == 'cuda':
@@ -160,8 +160,20 @@ def main(cfg: DictConfig):
             print(f"Step {step}: {label} {values[f'val/{metric}']:.4f} @ {int(values['val/n_metric_samples'])} samples", flush=True)
             if metric != 'gfid' and 'val/gfid' in values:
                 print(f"Step {step}: gFID {values['val/gfid']:.4f}", flush=True)
+        best_metric = cfg.checkpoint_params.get('save_best_metric')
+        if best_metric:
+            score = values[f'val/{best_metric}']
+            if not torch.isfinite(torch.tensor(score)):
+                raise FloatingPointError(f'Nonfinite validation {best_metric}: {score}')
+            previous = getattr(module, 'best_validation', None)
+            if previous is None or score < previous['value']:
+                module.best_validation = dict(metric=best_metric, value=score, step=step)
+                save_checkpoint(log_dir / 'checkpoints' / 'best.ckpt', module, optimizer,
+                                scheduler, step, batch_step, config)
 
     if checkpoint is not None and checkpoint.get('validation_pending'):
+        validate()
+    elif checkpoint is None and params.get('validate_before_training', False) and params.limit_val_batches:
         validate()
     try:
         while params.max_steps < 0 or step < params.max_steps:

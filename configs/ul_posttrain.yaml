@@ -1,0 +1,16 @@
+defaults:
+  - ul
+  - _self_
+
+name: ul/posttrain-reptok-w3
+trainer_module:
+  target: ldm.ul_posttrain.ULPosttrainRepTok
+  params:
+    prior_weight: 3.0
+    lr: 1e-5
+    encoder_lr: 1e-6
+trainer_params:
+  validate_before_training: true
+  val_check_interval: 1000
+checkpoint_params:
+  save_best_metric: gfid

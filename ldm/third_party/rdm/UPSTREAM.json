@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/vita-epfl/RDM",
+  "commit": "391e2749d8fa078ce3644be2ff9e5afe83ce7a61",
+  "files": {
+    "kernels.py": {
+      "path": "rdm/compare/kernels.py",
+      "sha256": "22d81109adac56e533fd049698d70ec2aa23de6e032104b4a8df15b0abf12c35"
+    },
+    "median_heuristic.py": {
+      "path": "rdm/compare/median_heuristic.py",
+      "sha256": "09deee02da6fcdcccd9e82e475a265476037ab3c53d10732e3811788653889ec"
+    },
+    "mmd_exact.py": {
+      "path": "rdm/compare/mmd_exact.py",
+      "sha256": "b74dcbb72c765f20ea28a44c5eab66cfafb570fdea80c822080967df84e4ce17"
+    }
+  },
+  "modifications": "None. Two-sided trainable-reference adaptation is in ldm/mmd_objective.py."
+}
