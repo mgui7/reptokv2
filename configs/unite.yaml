@@ -1,0 +1,65 @@
+defaults:
+  - _self_
+  - data: imagenet256_latents
+  - autoencoder: tiny_ae
+  - lr_scheduler: constant
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+name: unite/shared-1x1152-aux4
+seed: 2023
+log_root: logs
+slurm_id: null
+load_weights: null
+load_weights_strict: true
+resume_checkpoint: null
+
+trainer_module:
+  target: ldm.shared_unite.SharedUNITE
+  params:
+    net_cfg:
+      target: ldm.models.transformer.shared_mmdit.SharedMMDiT
+      params:
+        in_channels: 4
+        input_size: 32
+        patch_size: 2
+        depth: 28
+        hidden_size: 1152
+        num_heads: 16
+        num_classes: 1000
+        class_dropout_prob: 0.1
+        n_aux_registers: 4
+        learn_sigma: true
+        load_from_ckpt: checkpoints/SiT-XL-2-256x256.pt
+        compile: true
+        use_checkpointing: true
+    first_stage_cfg: ${autoencoder}
+    lr: 1e-4
+    weight_decay: 0.0
+    ema_rate: 0.9995
+    lr_scheduler_cfg: ${lr_scheduler}
+    # null preserves the saved mode on resume; fresh training uses stop.
+    token_grad_mode: null
+    # null preserves the saved weight on resume; fresh training uses 1.0.
+    token_loss_weight: null
+    recon_token_noise: 0.1
+    token_steps: 50
+    decoder_steps: 50
+    cfg_scale: 1.0
+    n_images_to_vis: 16
+
+trainer_params:
+  max_steps: 10000
+  accumulate_grad_batches: 1
+  log_every_n_steps: 50
+  limit_val_batches: 16
+  val_check_interval: 1000
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+checkpoint_params:
+  every_n_train_steps: 5000
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .

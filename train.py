@@ -33,7 +33,7 @@ def check_config(cfg):
 
 
 class RunLogger:
-    def __init__(self, directory, enabled):
+    def __init__(self, directory, enabled, extra_fields=()):
         self.writer = SummaryWriter(directory) if enabled else None
         self.file = None
         if enabled:
@@ -41,7 +41,7 @@ class RunLogger:
             fields = ['step', 'batch_step', 'train/loss', 'train/cos_sim',
                       'train/cos_sim_loss', 'lr-AdamW', 'val/fid', 'val/gfid', 'val/ssim',
                       'val/psnr', 'val/mse', 'val/n_metric_samples', 'val/loss']
-            self.csv = csv.DictWriter(self.file, fieldnames=fields)
+            self.csv = csv.DictWriter(self.file, fieldnames=fields + list(extra_fields))
             if self.file.tell() == 0:
                 self.csv.writeheader()
 
@@ -83,15 +83,22 @@ def main(cfg: DictConfig):
     params = cfg.trainer_params
     bf16 = params.precision == 'bf16-mixed'
     data = instantiate_from_config(cfg.data)
-    # Full stage-2 checkpoints already contain the frozen reconstruction model.
-    # Construct its saved architecture without reopening the old recon path.
+    # Self-contained checkpoints construct their saved architecture without
+    # reopening recon or model-initializer paths.
     source = cfg.resume_checkpoint or cfg.load_weights
-    if source and cfg.trainer_module.target == 'ldm.generation.TokenGenerator':
+    if source and cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE'):
+        overrides = {key: cfg.trainer_module.params.get(key)
+                     for key in ('token_grad_mode', 'token_loss_weight')}
         saved = torch.load(source, map_location='cpu', weights_only=False)
-        cfg.trainer_module.params = OmegaConf.create(saved['hyper_parameters'])
+        saved_params = saved['hyper_parameters']
+        if cfg.trainer_module.target == 'ldm.shared_unite.SharedUNITE':
+            # Explicit objective overrides preserve the saved architecture and
+            # all training states. Null defaults retain checkpoint settings.
+            saved_params.update({key: value for key, value in overrides.items() if value is not None})
+        cfg.trainer_module.params = OmegaConf.create(saved_params)
         del saved
     module = instantiate_from_config(cfg.trainer_module).to(device).train()
-    if cfg.trainer_module.target == 'ldm.generation.TokenGenerator':
+    if cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE'):
         cfg.trainer_module.params = OmegaConf.create(module.hyper_parameters)
     config = OmegaConf.to_container(cfg, resolve=True)
     if device.type == 'cuda':
@@ -130,7 +137,7 @@ def main(cfg: DictConfig):
         global_batch = cfg.data.params.batch_size * world * params.accumulate_grad_batches
         samples = cfg.data.params.val_batch_size * world * params.limit_val_batches
         print(f'Log directory: {log_dir}\nGlobal batch: {global_batch}; validation samples: {samples}', flush=True)
-    logger = RunLogger(str(log_dir), rank == 0)
+    logger = RunLogger(str(log_dir), rank == 0, getattr(module, 'extra_log_fields', ()))
     stopped = False
 
     def stop(signum, frame):
@@ -151,6 +158,8 @@ def main(cfg: DictConfig):
             metric = getattr(module, 'validation_metric', 'fid')
             label = 'gFID' if metric == 'gfid' else 'rFID'
             print(f"Step {step}: {label} {values[f'val/{metric}']:.4f} @ {int(values['val/n_metric_samples'])} samples", flush=True)
+            if metric != 'gfid' and 'val/gfid' in values:
+                print(f"Step {step}: gFID {values['val/gfid']:.4f}", flush=True)
 
     if checkpoint is not None and checkpoint.get('validation_pending'):
         validate()
@@ -176,6 +185,8 @@ def main(cfg: DictConfig):
                     message = f"Step {step}: flow={values['train/loss']:.6f}"
                     if 'train/cos_sim_loss' in values:
                         message += f", cosine={values['train/cos_sim_loss']:.6f}"
+                    if 'train/token_loss' in values:
+                        message += f", image={values['train/image_loss']:.6f}, token={values['train/token_loss']:.6f}"
                     print(message, flush=True)
             should_validate = bool(params.limit_val_batches and batch_step % params.val_check_interval == 0)
             interval = cfg.checkpoint_params.every_n_train_steps

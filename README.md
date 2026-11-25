@@ -23,7 +23,7 @@ git fetch /path/to/original/ziptok 33b4277437db35929c5468feecff76b2cf224ac2
 The imported legacy history is only for local verification; do not push it to this
 source-only repository. Training and sampling do not require that history.
 
-A minimal PyTorch implementation of the existing `cls-init-cos` baseline. Stage 1 retains DINO CLS token adaptation, cosine regularization, and the MMDiT flow decoder. Stage 2 adds the original class-conditioned 1D token Transformer over frozen projected tokens. Both use one native training loop; no Lightning runtime, video models, notebooks, or alternative regularizers.
+A minimal PyTorch implementation of the existing `cls-init-cos` baseline. Stage 1 retains DINO CLS token adaptation, cosine regularization, and the MMDiT flow decoder. Stage 2 adds the original class-conditioned 1D token Transformer over frozen projected tokens. Both use one native training loop; no Lightning runtime, video models, or notebooks. The additional shared image/token experiment is described in [UNITE.md](UNITE.md).
 
 Reference: `jm/cont-tok` commit `33b4277437db35929c5468feecff76b2cf224ac2`, experiment `imnet256/tokenizer/cls-init-cos`. The native loop and container launch structure follow `qdino-v2`; numerical behavior follows the original RepTok implementation.
 
@@ -94,7 +94,7 @@ with torch.inference_mode(), torch.autocast('cuda', dtype=torch.bfloat16):
 
 New recon saves embed the DINO architecture config for offline codec construction. Starting gen from an older recon save that lacks it may need the Hugging Face **config** cached/downloadable once; it does not reload pretrained DINO weights or the old SiT/TAESD files. After saving gen, its model loading is self-contained. Inception evaluation weights and training datasets are separate runtime assets. The loader targets this branch's gen checkpoints; old Lightning gen files with other architectures are not automatically converted.
 
-UNITE/shared image-token denoising remains a design discussion; it is not implemented in this branch.
+This branch additionally implements an experimental shared image/token model; see [UNITE.md](UNITE.md). The default RepTok configurations and model computations remain the baseline.
 
 ## Outputs and resume
 

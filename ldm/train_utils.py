@@ -77,7 +77,7 @@ def train_batch(module, batch, optimizer, scheduler, batch_idx, accumulation,
     if step:
         if clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(
-                [p for p in module.parameters() if p.requires_grad], clip_norm,
+                [p for p in module.parameters() if p.requires_grad], clip_norm, error_if_nonfinite=True,
             )
         optimizer.step()
     return metrics, step
