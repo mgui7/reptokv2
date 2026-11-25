@@ -1,0 +1,20 @@
+defaults:
+  - gen_mlp
+  - _self_
+
+# Same frozen codec, data and evaluation budget as the completed 100k baseline.
+recon_checkpoint: /e/scratch/lift-virg/gui2/reptok/baselines/cos01-20260922/logs/recon/2026-09-23/1965038/checkpoints/final.ckpt
+trainer_params:
+  max_steps: 100000
+  limit_val_batches: 16
+
+data:
+  params:
+    tar_base: /e/scratch/jureap52/datasets/imagenet_shards_raw_shuffled
+    train:
+      shards: 'imagenet_train_{000000..000146}.tar'
+      image_key: jpg
+      rename:
+        image: jpg
+    validation:
+      shards: '/e/project1/jureap52/schb/data/imagenet256_latents_wds/val-shards/{000000..000033}.tar'

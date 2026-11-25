@@ -1,0 +1,6 @@
+defaults:
+  - gen
+  - override model: token-mlp
+  - _self_
+
+name: imnet256/gen/cls-projected/mlp-mixer

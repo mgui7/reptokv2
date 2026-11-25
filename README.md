@@ -2,7 +2,8 @@
 
 ## Repository branches
 
-- `main` and `recon`: native RepTok reconstruction and stage-2 generation baseline.
+- `main`: native RepTok reconstruction and generation, including the ordinary MLP-Mixer generator.
+- `recon`: original native reconstruction and stage-2 Transformer baseline snapshot.
 - `self-flow`: frozen Self-Flow layer-16 encoder experiment.
 - `unite`: shared image/token Transformer experiment.
 - `ul`: joint UL, FD/MMD, post-training, and x-pred experiments.
@@ -70,6 +71,29 @@ Generation uses raw ImageNet images, encodes frozen **projected 1 x 1152 tokens*
 Validation reports **gFID**, sample count, and token flow loss; PSNR/SSIM between different generated images are not reported. Default validation uses 1,280 images per GPU (5,120 with four GPUs), not FID@50k. `trainer_module.params.sample_kwargs` controls token sampling, including `cfg_scale`; `decoder_steps` separately controls image decoding.
 
 The frozen codec contains the recon tokenizer, selected EMA decoder (or decoder if no EMA exists), and image AE. It loads without `torch.compile` wrappers, normalizing their state-key prefixes; the recon training compile setting is unchanged. It stays in evaluation mode. Reconstruction is no longer instantiated through a nested Lightning checkpoint loader. Decoder sampling uses the current autocast context, without the old wrapper's forced inner FP16 context. This is a minimal stage-2 implementation, not a claim of full numerical equivalence to the old generation training loop.
+
+### Ordinary RepTok MLP generator
+
+`gen_mlp` replaces the token Transformer with the ordinary MLP-Mixer: **28 layers,
+width 1280, 189,486,852 trainable generator parameters** for the local projected
+`1 x 1152` tokens and 1,000 classes. It reproduces the historical ordinary
+`mlp-mixer` configuration (token expansion 4, feature expansion 2), with no attention.
+The existing tokenizer, projection, reconstruction decoder and image AE are loaded
+from `recon_checkpoint` and frozen. The optimizer, flow target, sampling defaults
+and evaluation protocol are inherited from `gen`.
+
+```bash
+bash scripts/run.sh --config-name gen_mlp recon_checkpoint=/current/path/recon.ckpt trainer_params.max_steps=100000
+```
+
+Use the same local reconstruction checkpoint and dataset overrides as the baseline
+for a generator-only comparison. The existing local baseline codec is at
+`/e/scratch/lift-virg/gui2/reptok/baselines/cos01-20260922/logs/recon/2026-09-23/1965038/checkpoints/final.ckpt`.
+`gen_mlp_jupiter` selects that local codec and the verified Jupiter dataset paths,
+with 100,000 updates and the completed baseline's 16 validation batches per GPU
+(1,024 validation images on four GPUs). Use `--config-name gen_mlp_jupiter` when
+launching through `scripts/jupiter.sh`. Logs and checkpoints follow `log_root`;
+the local `logs` symlink can point to the experiment directory on scratch.
 
 ### Checkpoints and portability
 
@@ -160,3 +184,14 @@ apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python test
 These compare the token Transformer with the old source, verify frozen codec weights,
 exercise actual small DINO + TAESD constructors with external loading blocked, and
 remove the original recon checkpoint before restoring gen from another directory.
+
+MLP-specific checks (the integration checks use a reduced model and synthetic data):
+
+```bash
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/mlp_mixer.py
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/generation.py --backbone mixer
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/generation.py --backbone mixer --ddp
+```
+
+`tests/mlp_mixer.py --legacy-source /path/to/old/mlp-mixer.py` additionally checks
+exact historical initialization, forward outputs and gradients on a small model.

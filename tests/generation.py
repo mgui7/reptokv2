@@ -37,6 +37,7 @@ if len(sys.argv) > 1 and sys.argv[1] == '--worker':
 
 p = argparse.ArgumentParser()
 p.add_argument('--ddp', action='store_true')
+p.add_argument('--backbone', choices=['transformer', 'mixer'], default='transformer')
 args = p.parse_args()
 torch.set_num_threads(1)
 env = os.environ.copy()
@@ -128,10 +129,13 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
     assert not any(p.requires_grad for p in codec.parameters())
 
     with initialize_config_dir(config_dir=str(ROOT / 'configs'), version_base=None):
-        cfg = compose(config_name='gen')
+        cfg = compose(config_name='gen_mlp' if args.backbone == 'mixer' else 'gen')
     OmegaConf.set_struct(cfg, False)
     cfg.data = dict(target='fixtures.TinyGenData', params=dict(batch_size=2, val_batch_size=2))
-    cfg.model.params.net_cfg.params = net_args
+    cfg.model.params.net_cfg.params = (dict(
+        n_channels=1, channels=32, dim=48, depth=2, num_classes=3,
+        class_dropout_prob=0.1, compile=False,
+    ) if args.backbone == 'mixer' else net_args)
     cfg.recon_checkpoint = str(recon_path)
     cfg.trainer_module.params.sample_kwargs.num_steps = 2
     cfg.trainer_module.params.sample_kwargs.cfg_scale = 1.5
@@ -182,4 +186,4 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
             torch.testing.assert_close(value, resumed['state_dict'][key], rtol=0, atol=0)
     print('GEN PASSED: original token weights/forward exact, gradients within FP32 tolerance (atol=1e-6, rtol=1e-5); frozen codec, CFG, training, validation, '
           'resume and identical inference after removing recon and moving gen checkpoint;',
-          'two-process CPU DDP' if args.ddp else 'GPU BF16')
+          args.backbone, 'two-process CPU DDP' if args.ddp else 'BF16 mixed precision')
