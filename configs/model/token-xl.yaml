@@ -1,0 +1,19 @@
+name: 1D-MMDiT-XL-2
+# Flow Model
+target: ldm.generation.TokenFlow
+params:
+  schedule: linear
+  sigma_min: 0.0
+  net_cfg:
+    target: ldm.models.transformer.token_dit.OneDimensionalTransformer
+    params:
+      num_channels: 1
+      in_channels: 1152
+      hidden_size: 1152
+      depth: 28
+      num_heads: 16
+      mlp_ratio: 4
+      class_dropout_prob: 0.1
+      num_classes: 1000
+      n_registers: 1
+      split_channels: 1

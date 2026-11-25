@@ -1,0 +1,11 @@
+target: ldm.tokenizer.ClsTokenizer
+params:
+  compile: ${compile}
+  mlp_out_dim: ${oc.select:model.params.net_cfg.params.hidden_size, 1152}
+  # DINO encoder config
+  encoder:
+    target: ldm.encoders.DINOImageEncoder
+    params:
+      # trainable_layers: []        # option 1: freeze all layers
+      # trainable_layers: all       # option 2: train all layers
+      trainable_layers: ['embeddings.cls_token']  # option 3: train only the following layers

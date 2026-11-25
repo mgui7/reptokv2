@@ -1,0 +1,51 @@
+defaults:
+  - _self_
+  - model: mmdit-xl-2
+  - data: imagenet256_latents
+  - autoencoder: tiny_ae
+  - tokenizer: cls
+  - lr_scheduler: constant
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# Values resolved from the original experiment/imnet256/tokenizer/cls-init-cos.
+name: imnet256/ziptok/mmdit-xl-2/cls/cos-sim_0.1
+seed: 2023
+compile: true
+log_root: logs
+slurm_id: null
+load_weights: null
+load_weights_strict: true
+resume_checkpoint: null
+
+trainer_module:
+  target: ldm.trainer.RepTok
+  params:
+    flow_cfg: ${model}
+    tokenizer_cfg: ${tokenizer}
+    first_stage_cfg: ${autoencoder}
+    lr: 1e-4
+    weight_decay: 0.0
+    ema_rate: 0.9995
+    lr_scheduler_cfg: ${lr_scheduler}
+    dino_loss_weight: 0.1
+    n_images_to_vis: 16
+    sample_kwargs:
+      num_steps: 50
+      progress: false
+
+trainer_params:
+  max_steps: -1
+  accumulate_grad_batches: 1
+  log_every_n_steps: 50
+  limit_val_batches: 16
+  val_check_interval: 5000
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+checkpoint_params:
+  every_n_train_steps: 10000
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .

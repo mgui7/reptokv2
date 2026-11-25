@@ -1,0 +1,18 @@
+# Use the existing jenv-video.sif PyTorch/CUDA environment.
+# No Lightning or xformers dependency.
+torch
+torchvision
+timm
+transformers
+hydra-core
+omegaconf
+webdataset
+numpy
+pillow
+einops
+tensorboard
+torchmetrics
+torch-fidelity
+tqdm
+# Already present in jenv-video.sif; otherwise install this project utility:
+# pip install git+https://github.com/joh-schb/jutils.git

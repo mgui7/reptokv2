@@ -1,0 +1,21 @@
+name: MMDiT-XL-2
+# Flow Model
+target: ldm.flow.FlowModel
+params:
+  schedule: linear
+  sigma_min: 0.0
+  net_cfg:
+    target: ldm.models.transformer.mmdit.MMDiT
+    params:
+      in_channels: 4
+      input_size: 32
+      depth: 28
+      hidden_size: 1152
+      patch_size: 2
+      num_heads: 16
+      num_classes: 1000   # we only use the null class
+      compile: ${compile}
+      # with warm-start
+      learn_sigma: True
+      load_from_ckpt: checkpoints/SiT-XL-2-256x256.pt
+      null_class_cond: True     # always use null-class as conditioning in forward

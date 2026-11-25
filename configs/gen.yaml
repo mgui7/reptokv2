@@ -1,0 +1,49 @@
+defaults:
+  - _self_
+  - model: token-xl
+  - data: imagenet256
+  - lr_scheduler: constant
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+name: imnet256/gen/cls-projected
+seed: 2023
+log_root: logs
+slurm_id: null
+# Required only for fresh gen training, not a full gen checkpoint resume.
+recon_checkpoint: null
+load_weights: null
+load_weights_strict: true
+resume_checkpoint: null
+
+trainer_module:
+  target: ldm.generation.TokenGenerator
+  params:
+    flow_cfg: ${model}
+    recon_checkpoint: ${recon_checkpoint}
+    lr: 1e-4
+    weight_decay: 0.0
+    ema_rate: 0.0
+    lr_scheduler_cfg: ${lr_scheduler}
+    n_images_to_vis: 16
+    decoder_steps: 50
+    sample_kwargs:
+      num_steps: 50
+      progress: false
+      cfg_scale: 1.0
+
+trainer_params:
+  max_steps: -1
+  accumulate_grad_batches: 1
+  log_every_n_steps: 50
+  limit_val_batches: 80
+  val_check_interval: 10000
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+checkpoint_params:
+  every_n_train_steps: 20000
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
