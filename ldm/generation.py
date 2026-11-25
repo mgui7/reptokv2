@@ -12,7 +12,24 @@ from ldm.trainer import update_ema
 
 
 class TokenFlow(FlowModel):
-    def forward(self, x, t, cfg_scale=1.0, **kwargs):
+    """Token flow; x-output uses JiT's velocity-space loss and readout.
+
+    Time runs from noise (0) to data (1). Keep the original uniform time
+    distribution and Euler solver. Only the x-output path uses the denominator
+    floor, on BOTH prediction and target, as in LTH14/JiT/denoiser.py.
+    """
+    def __init__(self, net_cfg, schedule="linear", sigma_min=0.0,
+                 prediction_type="v", t_eps=0.05):
+        if prediction_type not in ("v", "x"):
+            raise ValueError("Token prediction_type must be 'v' or 'x'.")
+        if not 0 < t_eps <= 1:
+            raise ValueError("t_eps must be in (0, 1].")
+        if prediction_type == "x" and sigma_min != 0:
+            raise ValueError("JiT x-pred requires the deterministic linear path (sigma_min=0).")
+        super().__init__(net_cfg, schedule, sigma_min)
+        self.prediction_type, self.t_eps = prediction_type, float(t_eps)
+
+    def _predict(self, x, t, cfg_scale=1.0, **kwargs):
         if cfg_scale == 1.0:
             return super().forward(x, t, **kwargs)
         y = kwargs.pop('y')
@@ -25,6 +42,48 @@ class TokenFlow(FlowModel):
             torch.cat([x, x]), torch.cat([t, t]), y=labels, **kwargs,
         ).chunk(2)
         return unconditional + cfg_scale * (conditional - unconditional)
+
+
+    def predict_clean(self, x, t, **kwargs):
+        """Direct network output for one-call FD; no input-noise residual."""
+        if self.prediction_type != "x":
+            raise ValueError("Direct clean prediction requires an x-pred checkpoint.")
+        return self._predict(x, t, **kwargs)
+
+    def _denominator(self, t, x):
+        return (1 - t.float()).clamp_min(self.t_eps).reshape(-1, *([1] * (x.ndim - 1)))
+
+    def forward(self, x, t, **kwargs):
+        prediction = self._predict(x, t, **kwargs)
+        if self.prediction_type == "v":
+            return prediction
+        # Subtract/divide in FP32, including under BF16 autocast.
+        return (prediction.float() - x.float()) / self._denominator(t, x)
+
+    def _jit_loss(self, x1, x0, t, **kwargs):
+        xt = self.compute_xt(x0.float(), x1.float(), t.float())
+        target = (x1.float() - xt) / self._denominator(t, xt)
+        predicted = self.forward(xt, t, **kwargs)
+        return (predicted - target).square().mean()
+
+    def training_losses(self, x1, x0=None, **kwargs):
+        if self.prediction_type == "v":
+            return super().training_losses(x1, x0, **kwargs)
+        if x0 is None:
+            x0 = torch.randn_like(x1, dtype=torch.float32)
+        t = self.t_sampler(len(x1), device=x1.device, dtype=torch.float32)
+        return self._jit_loss(x1, x0, t, **kwargs)
+
+    def validation_losses(self, x1, x0=None, num_segments=8, **kwargs):
+        if self.prediction_type == "v":
+            return super().validation_losses(x1, x0, num_segments, **kwargs)
+        if num_segments < 1:
+            raise ValueError("num_segments must be positive.")
+        if x0 is None:
+            x0 = torch.randn_like(x1, dtype=torch.float32)
+        times = (torch.arange(num_segments, device=x1.device, dtype=torch.float32) + .5) / num_segments
+        losses = torch.stack([self._jit_loss(x1, x0, t.expand(len(x1)), **kwargs) for t in times])
+        return losses.mean(), losses
 
 
 class GenerationMetrics(nn.Module):

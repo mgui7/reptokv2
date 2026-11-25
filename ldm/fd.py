@@ -25,9 +25,11 @@ class FDRepTok(ULRepTok):
                                      fd_normalization_epsilon=fd_normalization_epsilon)
 
     def generate_tokens(self, noise, labels):
-        # RepTok uses u=0 at noise and velocity z-eps. This residual map is
-        # trained directly to the noisy decoder-token distribution, not an ODE.
+        # An x-pred prior directly produces the token. Legacy v checkpoints
+        # retain their one-step Euler residual. Both are trained by FD here.
         time = noise.new_zeros(len(noise))
+        if getattr(self.prior, 'prediction_type', 'v') == 'x':
+            return self.prior.predict_clean(noise, time, y=labels, cfg_scale=1.).float()
         return noise.float() + self.prior(noise, time, y=labels, cfg_scale=1.).float()
 
     def losses(self, batch):

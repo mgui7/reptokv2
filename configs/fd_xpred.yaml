@@ -1,0 +1,11 @@
+defaults:
+  - fd_posttrain
+  - _self_
+
+name: fd/posttrain-clean-noise08-06-xpred
+prior:
+  params:
+    prediction_type: x
+    t_eps: 0.05
+trainer_params:
+  max_steps: 100000

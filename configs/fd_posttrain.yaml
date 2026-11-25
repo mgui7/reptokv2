@@ -1,0 +1,21 @@
+defaults:
+  - fd
+  - _self_
+
+name: fd/posttrain-clean-noise08-06
+trainer_module:
+  target: ldm.fd_posttrain.FDPosttrainRepTok
+  params:
+    lr: 1e-5
+    encoder_lr: 1e-6
+    freeze_decoder_time_mlp: true
+    decoder_noise_reference_std: ???
+    decoder_signal_scale: 0.8
+    decoder_noise_scale: 0.6
+    decoder_clean_probability: 0.2
+trainer_params:
+  max_steps: 35000
+  validate_before_training: true
+  val_check_interval: 1000
+checkpoint_params:
+  save_best_metric: gfid

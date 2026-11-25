@@ -86,7 +86,7 @@ def main(cfg: DictConfig):
     # Self-contained checkpoints construct their saved architecture without
     # reopening recon or model-initializer paths.
     source = cfg.resume_checkpoint or cfg.load_weights
-    if source and cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE', 'ldm.ul.ULRepTok', 'ldm.fd.FDRepTok', 'ldm.mmd.MMDRepTok', 'ldm.ul_posttrain.ULPosttrainRepTok'):
+    if source and cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE', 'ldm.ul.ULRepTok', 'ldm.fd.FDRepTok', 'ldm.mmd.MMDRepTok', 'ldm.ul_posttrain.ULPosttrainRepTok', 'ldm.fd_posttrain.FDPosttrainRepTok'):
         overrides = {key: cfg.trainer_module.params.get(key)
                      for key in ('token_grad_mode', 'token_loss_weight')}
         saved = torch.load(source, map_location='cpu', weights_only=False)
@@ -98,7 +98,7 @@ def main(cfg: DictConfig):
         cfg.trainer_module.params = OmegaConf.create(saved_params)
         del saved
     module = instantiate_from_config(cfg.trainer_module).to(device).train()
-    if cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE', 'ldm.ul.ULRepTok', 'ldm.fd.FDRepTok', 'ldm.mmd.MMDRepTok', 'ldm.ul_posttrain.ULPosttrainRepTok'):
+    if cfg.trainer_module.target in ('ldm.generation.TokenGenerator', 'ldm.shared_unite.SharedUNITE', 'ldm.ul.ULRepTok', 'ldm.fd.FDRepTok', 'ldm.mmd.MMDRepTok', 'ldm.ul_posttrain.ULPosttrainRepTok', 'ldm.fd_posttrain.FDPosttrainRepTok'):
         cfg.trainer_module.params = OmegaConf.create(module.hyper_parameters)
     config = OmegaConf.to_container(cfg, resolve=True)
     if device.type == 'cuda':

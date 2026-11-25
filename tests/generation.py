@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 from fixtures import build_reptok, model_params, TinyMetricTracker
 from ldm.codec import FrozenCodec
 from ldm.generation import TokenGenerator
+from ldm.train_utils import load_checkpoint
 from ldm.models.transformer.token_dit import OneDimensionalTransformer
 
 
@@ -37,6 +38,7 @@ if len(sys.argv) > 1 and sys.argv[1] == '--worker':
 
 p = argparse.ArgumentParser()
 p.add_argument('--ddp', action='store_true')
+p.add_argument('--prediction-type', choices=['v', 'x'], default='v')
 args = p.parse_args()
 torch.set_num_threads(1)
 env = os.environ.copy()
@@ -132,6 +134,7 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
     OmegaConf.set_struct(cfg, False)
     cfg.data = dict(target='fixtures.TinyGenData', params=dict(batch_size=2, val_batch_size=2))
     cfg.model.params.net_cfg.params = net_args
+    cfg.model.params.prediction_type = args.prediction_type
     cfg.recon_checkpoint = str(recon_path)
     cfg.trainer_module.params.sample_kwargs.num_steps = 2
     cfg.trainer_module.params.sample_kwargs.cfg_scale = 1.5
@@ -143,6 +146,17 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
     cfg.trainer_params.precision = '32-true' if args.ddp else 'bf16-mixed'
     cfg.checkpoint_params.every_n_train_steps = 2
     cfg.log_root = str(tmp / 'logs')
+    if args.prediction_type == 'x':
+        # Reproduce the failed production startup: weight-only init, no shape,
+        # actual train.py load_weights, then validation BEFORE the first update.
+        initial_module = TokenGenerator(**OmegaConf.to_container(cfg.trainer_module.params, resolve=True))
+        initial = tmp / 'weight-only.ckpt'
+        torch.save(dict(state_dict=initial_module.state_dict(),
+                        hyper_parameters=initial_module.hyper_parameters, global_step=0), initial)
+        load_checkpoint(initial, initial_module)
+        assert initial_module.latent_shape == (1, 32)
+        cfg.load_weights = str(initial)
+        cfg.trainer_params.validate_before_training = True
     OmegaConf.save(cfg, tmp / 'smoke.yaml')
     command = [sys.executable]
     if args.ddp:
@@ -157,6 +171,7 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
     for key, value in codec.state_dict().items():
         torch.testing.assert_close(value, state['state_dict']['codec.' + key], rtol=0, atol=0)
     inference = TokenGenerator.from_checkpoint(first)
+    assert inference.model.prediction_type == args.prediction_type
     before = inference.sample(labels, seed=42)
 
     moved = tmp / 'another-machine' / 'generation.ckpt'
@@ -166,7 +181,7 @@ with tempfile.TemporaryDirectory(prefix='reptok-gen-') as tmp:
     shutil.rmtree(first.parents[1])
     # Resume still sees the now-invalid original path in the runtime YAML.
     subprocess.run(command + ['slurm_id=resumed', 'trainer_params.max_steps=4',
-                             f'resume_checkpoint={moved}'], env=env, cwd=ROOT, check=True)
+                             f'resume_checkpoint={moved}', 'load_weights=null'], env=env, cwd=ROOT, check=True)
     with (patch('transformers.AutoConfig.from_pretrained', side_effect=AssertionError('external config')),
           patch('transformers.AutoModel.from_pretrained', side_effect=AssertionError('external weights'))):
         loaded = TokenGenerator.from_checkpoint(moved)

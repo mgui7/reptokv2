@@ -144,7 +144,10 @@ def load_checkpoint(path, module, optimizer=None, scheduler=None, strict=True):
         optimizer.load_state_dict(checkpoint['optimizer_states'][0])
     if scheduler is not None:
         scheduler.load_state_dict(checkpoint['lr_schedulers'][0])
-    module.latent_shape = checkpoint.get('latent_shape')
+    # Weight-only initializations may omit runtime shape metadata. Preserve
+    # the shape derived by the model constructor instead of replacing it by None.
+    if checkpoint.get('latent_shape') is not None:
+        module.latent_shape = checkpoint['latent_shape']
     if 'best_validation' in checkpoint:
         module.best_validation = dict(checkpoint['best_validation'])
     return checkpoint
