@@ -1,4 +1,4 @@
-"""Record a successful bounded iMF segment before scheduling its continuation."""
+"""Record a successful MeanFlow segment before scheduling its continuation."""
 import csv
 import json
 import math
@@ -6,9 +6,12 @@ from pathlib import Path
 import sys
 
 import torch
+from omegaconf import OmegaConf
 
 root, job, target = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
-folders = list((root / 'logs' / 'recon').glob(f'*/{job}/checkpoints'))
+config = OmegaConf.load(sys.argv[4]) if len(sys.argv) > 4 else None
+name = config.name if config is not None else 'recon'
+folders = list((root / 'logs' / name).glob(f'*/{job}/checkpoints'))
 if len(folders) != 1:
     raise RuntimeError(f'Expected one checkpoint directory, found {folders}')
 folder = folders[0]
@@ -24,7 +27,12 @@ if not previous < step <= target:
     raise RuntimeError(f'Unexpected training progress: {previous} -> {step}/{target}')
 if len(state['rng_states']) != 4:
     raise RuntimeError('Expected four GPU ranks.')
-if state['hyper_parameters']['flow_cfg']['target'] != 'ldm.imf.ImprovedMeanFlow':
+flow = state['hyper_parameters']['flow_cfg']
+if config is not None:
+    expected = OmegaConf.to_container(config.trainer_module.params.flow_cfg, resolve=True)
+    if flow != expected:
+        raise RuntimeError('Checkpoint decoder/sampler does not match the experiment config.')
+elif flow['target'] != 'ldm.imf.ImprovedMeanFlow':
     raise RuntimeError('Unexpected decoder objective.')
 with (folder.parent / 'metrics.csv').open() as stream:
     rows = list(csv.DictReader(stream))

@@ -1,0 +1,23 @@
+name: pMF-MMDiT-XL-16
+target: ldm.pmf.PixelMeanFlow
+params:
+  fm_ratio: 0.5
+  time_mean: -0.8  # Paper +0.8, reversed to this repo's 0=noise / 1=data.
+  time_std: 0.8
+  denominator_floor: 0.05
+  uniform_fraction: 0.0
+  noise_scale: 1.0
+  net_cfg:
+    target: ldm.models.transformer.imf_mmdit.PixelMMDiT
+    params:
+      in_channels: 3
+      input_size: 256
+      depth: 28
+      hidden_size: 1152
+      patch_size: 16  # Same 16x16 image-token grid as latent XL/2.
+      num_heads: 16
+      num_classes: 1000
+      compile: false
+      learn_sigma: false
+      load_from_ckpt: checkpoints/SiT-XL-2-256x256.pt
+      null_class_cond: true

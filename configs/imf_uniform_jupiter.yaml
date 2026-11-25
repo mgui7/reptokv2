@@ -1,0 +1,8 @@
+defaults:
+  - imf_jupiter
+  - _self_
+
+name: recon-imf-uniform
+model:
+  params:
+    uniform_fraction: 1.0

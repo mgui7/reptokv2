@@ -1,0 +1,17 @@
+defaults:
+  - pmf
+  - _self_
+
+name: recon-pmf
+trainer_params:
+  max_steps: 300000
+  max_time_seconds: 41400
+  limit_val_batches: 16
+data:
+  params:
+    tar_base: /e/project1/jureap52/schb/data/imagenet256_latents_wds
+model:
+  params:
+    net_cfg:
+      params:
+        load_from_ckpt: /e/scratch/jureap52/fischer13/checkpoints/SiT-XL-2-256x256.pt

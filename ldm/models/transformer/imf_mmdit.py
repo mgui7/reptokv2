@@ -51,3 +51,31 @@ class IMFMMDiT(MMDiT):
         if self.learn_sigma:
             x, _ = x.chunk(2, dim=1)
         return x
+
+
+class PixelMMDiT(IMFMMDiT):
+    """Pixel x-prediction with the same Transformer trunk and DINO context.
+
+    SiT's latent input/readout cannot be reused for RGB patches. Load all
+    shared tensors strictly, retaining fresh pixel adapters/interval embedding.
+    """
+    def __init__(self, *args, load_from_ckpt=None, **kwargs):
+        super().__init__(*args, load_from_ckpt=None, **kwargs)
+        if self.in_channels != 3 or self.out_channels != 3 or self.learn_sigma:
+            raise ValueError('PixelMMDiT requires RGB input/output and learn_sigma=false.')
+        if load_from_ckpt is not None:
+            state = torch.load(load_from_ckpt, map_location='cpu', weights_only=False)
+            adapters = {'x_embedder.proj.weight', 'x_embedder.proj.bias',
+                        'final_layer.linear.weight', 'final_layer.linear.bias'}
+            shared = {key: value for key, value in state.items() if key not in adapters}
+            expected_missing = adapters | {key for key in self.state_dict()
+                                           if key.startswith('interval_embedder.')}
+            current = self.state_dict()
+            if set(shared) != set(current) - expected_missing:
+                raise ValueError('Expected a SiT backbone state dictionary with matching shared keys.')
+            for key, value in shared.items():
+                if value.shape != current[key].shape:
+                    raise ValueError(f'SiT backbone shape mismatch: {key}')
+            result = self.load_state_dict(shared, strict=False)
+            assert set(result.missing_keys) == expected_missing and not result.unexpected_keys
+            print(f'[PixelMMDiT] Loaded SiT trunk from {load_from_ckpt}; pixel adapters are fresh.')

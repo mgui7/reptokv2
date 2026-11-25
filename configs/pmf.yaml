@@ -1,0 +1,13 @@
+defaults:
+  - config
+  - override model: pmf-xl-16
+  - _self_
+
+name: imnet256/ziptok/pmf-xl-16/cls/cos-sim_0.1
+trainer_module:
+  params:
+    first_stage_cfg: null
+    sample_kwargs:
+      num_steps: 1
+
+# Reuse baseline shards/crops. RepTok ignores their cached latents in pixel mode.

@@ -85,7 +85,10 @@ class RepTok(nn.Module):
         images = batch['image']
         # Keep the eager encode call: the legacy dict.get evaluates it even when
         # cached latents exist. Removing it can change random-number consumption.
-        latents = batch.get('latent', self.encode(images))
+        # Without an image AE the target is RGB, even if a reused dataset
+        # also supplies cached latent.npy entries.
+        latents = (self.encode(images) if self.first_stage is None
+                   else batch.get('latent', self.encode(images)))
         tokens = self.tokenizer(images)
         with torch.no_grad():
             teacher = self.frozen_dino(images)['cls_token']
@@ -104,7 +107,7 @@ class RepTok(nn.Module):
 
     def reconstruction_batch(self, batch, batch_idx):
         images = batch['image']
-        latents = batch.get('latent')
+        latents = batch.get('latent') if self.first_stage is not None else None
         tokens = self.tokenizer(images)['proj_token']
         encoded = self.encode(images)  # legacy default(latents, encode(images))
         latents = encoded if latents is None else latents

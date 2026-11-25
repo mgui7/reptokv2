@@ -1,0 +1,10 @@
+defaults:
+  - pmf_jupiter
+  - _self_
+
+# Sampler-only ablation: keep the standard pMF logit-normal parameters/noise.
+# This does not enable the other changes in the paper's long-training recipe.
+name: recon-pmf-mix10
+model:
+  params:
+    uniform_fraction: 0.1

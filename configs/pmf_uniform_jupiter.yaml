@@ -1,0 +1,10 @@
+defaults:
+  - pmf_jupiter
+  - _self_
+
+# Pure uniform-pair ablation; retain 50% diagonal FM samples and all other
+# pMF settings. This is not the paper's 10% uniform long-training mixture.
+name: recon-pmf-uniform
+model:
+  params:
+    uniform_fraction: 1.0

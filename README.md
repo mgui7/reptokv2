@@ -137,6 +137,103 @@ Failures are not retried automatically. The continuation cap is eight allocation
 matching the baseline's cap; reaching the cap preserves the latest checkpoint.
 `recon.json` records progress and `jobs.tsv` records continuation job IDs.
 
+## Controlled pixel MeanFlow experiment
+
+`pmf` applies pMF x-prediction with the iMF boundary-velocity objective while
+retaining the 28-layer, width-1152 MMDiT trunk, AdamW, DINO tokenizer/CLS/projection
+and cosine weight 0.1. It predicts RGB directly, without TAESD. At 256x256 it uses
+patch size 16, retaining the baseline's 16x16 image-token grid. Shared SiT trunk
+weights are loaded with strict key/shape checks; the incompatible RGB patch
+embedding and image readout are initialized afresh. This is not a full reproduction
+of the official pMF architecture or recipe (no auxiliary head, Muon, bottleneck
+embedding, perceptual image losses, adaptive loss weighting or CFG training).
+
+The prediction/loss distinction is:
+
+| Model | Direct network output | Regression space |
+| --- | --- | --- |
+| Existing FM | instantaneous velocity v in latent space | v |
+| Existing iMF | average velocity u in latent space | v via the iMF identity |
+| New pMF | RGB x-prediction | v via x -> u -> the iMF identity |
+
+With our 0=noise / 1=data convention, pMF converts pixels to velocity using
+`u = (x_pred - z_t) / max(1-t, 0.05)`. The JVP differentiates this whole conversion,
+including the denominator, using the model's boundary velocity as its tangent.
+The matching target is `(image - z_t) / max(1-t, 0.05)`, following the official
+implementation's denominator floor. One-step inference reduces to the network's
+RGB prediction; it requires no TAESD, teacher or JVP.
+
+Default training time sampling is **logit-normal**:
+
+| Setting | Paper time: 1=noise | This repo: 0=noise |
+| --- | --- | --- |
+| iMF reference/default | logit-normal(-0.4, 1.0) | logit-normal(+0.4, 1.0) |
+| pMF standard recipe | logit-normal(+0.8, 0.8) | logit-normal(-0.8, 0.8) |
+
+Both have 50% diagonal FM samples and otherwise cover the full time-pair triangle.
+pMF's official code sets the diagonal before sorting; iMF's sets it after sorting.
+The pMF implementation preserves that distinction. `time_mean` and `time_std`
+parameterize a Gaussian **before sigmoid**, not the mean/std of time itself.
+
+The pMF paper does not establish that uniform sampling cannot work. Its Table 3b
+compares full two-dimensional time-pair sampling to restrictions to `r=t`, `r=0`,
+or those two lines; the restricted settings fail. Its longer-training setup uses
+logit-normal(0, 0.8), doubled noise scale, and a 10% uniform-pair mixture. This can
+be explored with `model.params.time_mean=0 model.params.noise_scale=2
+model.params.uniform_fraction=0.1`. The default experiment instead uses the standard
+0.8/0.8 recipe and noise scale 1. Uniform time grids for multi-step **inference**
+are separate from this training distribution.
+
+References: [pMF paper, Algorithms 1/2, Table 3b, Table 8 and Appendix A.1](https://arxiv.org/html/2601.22158v2),
+[actual pMF-B/16 training config](https://github.com/Lyy-iiis/pMF/blob/main/configs/pMF_B_16_config.yml),
+[official pMF sampler and training loss](https://github.com/Lyy-iiis/pMF/blob/main/pmf.py),
+[official iMF sampler](https://github.com/Lyy-iiis/imeanflow/blob/main/imf.py).
+The shared pMF `configs/default.py` still has inherited -0.4/1.0 values; the model
+training YAML overrides them. Reading only those base defaults gives the wrong recipe.
+
+```bash
+bash scripts/run.sh --config-name pmf_jupiter
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/imf.py --pmf
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/smoke.py --pmf
+apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python tests/smoke.py --pmf --ddp
+```
+
+`pmf_jupiter` prepares a 300,000-update run with the baseline dataset/crops, batch
+size, optimizer, EMA and validation cadence. It reuses the original image shards;
+cached spatial latents are ignored whenever `first_stage_cfg` is null. The cosine
+term still aligns tokenizer features to the frozen DINO teacher; it is not a
+substitute for the paper's LPIPS/ConvNeXt image perceptual losses. No pMF quality
+or throughput results have been measured.
+
+For the sampler-only ablation use `--config-name pmf_uniform_jupiter`. It inherits
+the same 300k-step pixel experiment and changes only the run name and
+`uniform_fraction=1.0`: draw both times independently from U(0,1), set half the
+batch to the FM diagonal, and sort the remaining pairs. The off-diagonal pairs
+are uniform over the time triangle; their individual sorted endpoints are not
+both marginally uniform. Noise scale, denominator floor, model, initialization,
+loss, optimizer, cosine regularization and evaluation stay unchanged. The existing
+`imf_jupiter` experiment already uses logit-normal sampling; no duplicate iMF run
+is needed to enable it.
+
+The five-run sampler comparison uses `imf_jupiter`, `imf_uniform_jupiter`,
+`pmf_jupiter`, `pmf_uniform_jupiter`, and `pmf_mix10_jupiter`. The last mixes 90%
+standard pMF logit-normal pairs with 10% uniform pairs, retaining mean -0.8,
+std 0.8 and noise scale 1. The iMF uniform variant preserves iMF's existing
+sort-before-diagonal convention. Within each model family only the pair sampler
+changes; all runs retain the same cosine loss and 50% diagonal FM proportion
+(Bernoulli membership for iMF, fixed half-batch for pMF).
+
+`scripts/meanflow_jupiter.sh RUN_ROOT CONFIG_NAME` runs a frozen source snapshot
+with a saved `RUN_ROOT/resolved.yaml`. Every experiment targets **300,000 optimizer
+steps**, on four GH200 GPUs with global batch 128. Each Slurm allocation allows
+12 hours; the training process requests a graceful stop after 41,400 seconds
+(11.5 hours, including initialization, validation and periodic saves), leaving
+time for its final checkpoint. This is a per-allocation limit, not a total training
+budget. Successful finite checkpoints resume automatically, up to eight allocations;
+errors or exhaustion of that safeguard require intervention. The five runs need
+not finish in the same wall-clock time. Each run records its continuation jobs in
+`jobs.tsv` and latest verified progress in `recon.json`.
+
 ## Stage-2 generation
 
 The default command still runs reconstruction. To train the minimal generator after recon:

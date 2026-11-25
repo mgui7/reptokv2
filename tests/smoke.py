@@ -9,11 +9,13 @@ import tempfile
 import torch
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
-from fixtures import model_params, imf_params
+from fixtures import model_params, imf_params, pmf_params
 
 p = argparse.ArgumentParser()
 p.add_argument('--ddp', action='store_true', help='Two CPU processes; no second GPU required.')
-p.add_argument('--imf', action='store_true', help='Exercise the stage-1 iMF decoder.')
+objective = p.add_mutually_exclusive_group()
+objective.add_argument('--imf', action='store_true', help='Exercise the stage-1 iMF decoder.')
+objective.add_argument('--pmf', action='store_true', help='Exercise the pixel pMF decoder.')
 args = p.parse_args()
 root = Path(__file__).resolve().parents[1]
 with initialize_config_dir(config_dir=str(root / 'configs'), version_base=None):
@@ -22,7 +24,7 @@ OmegaConf.set_struct(cfg, False)
 cfg.name = 'smoke'
 cfg.data = {'target': 'fixtures.TinyData', 'params': {'batch_size': 2, 'val_batch_size': 2}}
 cfg.trainer_module = {'target': 'fixtures.build_reptok',
-                      'params': imf_params() if args.imf else model_params()}
+                      'params': pmf_params() if args.pmf else imf_params() if args.imf else model_params()}
 cfg.trainer_params.max_steps = 2
 cfg.trainer_params.val_check_interval = 2
 cfg.trainer_params.limit_val_batches = 2
@@ -59,6 +61,6 @@ with tempfile.TemporaryDirectory(prefix='reptok-smoke-') as temp:
     assert all(v['step'].item() == 4 for v in resumed['optimizer_states'][0]['state'].values())
     assert any(not torch.equal(state['state_dict'][k], resumed['state_dict'][k])
                for k in state['state_dict'] if k.startswith('model.'))
-    print('SMOKE PASSED:', 'iMF' if args.imf else 'FM',
+    print('SMOKE PASSED:', 'pMF' if args.pmf else 'iMF' if args.imf else 'FM',
           'two-process CPU DDP' if args.ddp else 'single-process mixed precision',
           'train, validate, checkpoint, resume; metric values are synthetic proxies.')

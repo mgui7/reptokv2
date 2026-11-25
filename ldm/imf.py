@@ -12,13 +12,17 @@ from ldm.flow import FlowModel, pad_v_like_x
 
 
 class ImprovedMeanFlow(FlowModel):
-    def __init__(self, net_cfg, fm_ratio=0.5, time_mean=0.4, time_std=1.0):
+    def __init__(self, net_cfg, fm_ratio=0.5, time_mean=0.4, time_std=1.0,
+                 uniform_fraction=0.0):
         super().__init__(net_cfg)
         if not 0 < fm_ratio < 1:
             raise ValueError('fm_ratio must be between 0 and 1.')
         if time_std <= 0:
             raise ValueError('time_std must be positive.')
+        if not 0 <= uniform_fraction <= 1:
+            raise ValueError('uniform_fraction must be in [0, 1].')
         self.fm_ratio = fm_ratio
+        self.uniform_fraction = uniform_fraction
         # Paper uses -0.4 with 1=noise; reversing time changes this to +0.4.
         self.time_mean, self.time_std = time_mean, time_std
 
@@ -31,6 +35,9 @@ class ImprovedMeanFlow(FlowModel):
     def sample_times(self, batch_size, device):
         times = torch.sigmoid(torch.randn(2, batch_size, device=device)
                               * self.time_std + self.time_mean)
+        if self.uniform_fraction:
+            mask = torch.rand(batch_size, device=device) < self.uniform_fraction
+            times = torch.where(mask[None], torch.rand_like(times), times)
         t, s = times.min(dim=0).values, times.max(dim=0).values
         # Random membership also permits both objectives with microbatch size 1.
         fm_mask = torch.rand(batch_size, device=device) < self.fm_ratio

@@ -123,6 +123,18 @@ def imf_params():
     return params
 
 
+def pmf_params():
+    params = imf_params()
+    params.first_stage_cfg = None
+    params.flow_cfg.target = 'ldm.pmf.PixelMeanFlow'
+    params.flow_cfg.params.time_mean = -0.8
+    params.flow_cfg.params.time_std = 0.8
+    params.flow_cfg.params.net_cfg.target = 'ldm.models.transformer.imf_mmdit.PixelMMDiT'
+    params.flow_cfg.params.net_cfg.params.in_channels = 3
+    params.flow_cfg.params.net_cfg.params.learn_sigma = False
+    return params
+
+
 class GenBatches(Batches):
     def __iter__(self):
         for batch in super().__iter__():
