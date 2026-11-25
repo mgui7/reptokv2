@@ -1,0 +1,14 @@
+defaults:
+  - config
+  - override tokenizer: self_flow
+  - _self_
+
+name: self-flow/layer16
+self_flow_checkpoint: null
+self_flow_vae: null
+trainer_module:
+  params:
+    dino_loss_weight: 0.0
+trainer_params:
+  max_steps: 300000
+  error_if_nonfinite: true

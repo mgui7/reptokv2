@@ -32,7 +32,7 @@ def codec_config(params, tokenizer=None):
             for key, value in node.items():
                 if key == 'compile':
                     node[key] = False
-                elif key in ('load_from_ckpt', 'encoder_path', 'decoder_path'):
+                elif key in ('load_from_ckpt', 'encoder_path', 'decoder_path', 'vae_pretrained'):
                     node[key] = None
                 else:
                     clear_initializers(value)
@@ -51,7 +51,30 @@ def codec_config(params, tokenizer=None):
             from transformers import AutoConfig
             name = encoder['params'].get('model_name', 'facebook/dinov2-with-registers-base')
             encoder['params']['model_config'] = AutoConfig.from_pretrained(name).to_dict()
+    if encoder['target'] == 'ldm.self_flow_encoder.FrozenSelfFlowEncoder':
+        if tokenizer is not None:
+            encoder['params']['vae_config'] = dict(uncompiled(tokenizer.encoder).vae.config)
+        elif 'vae_config' not in encoder['params']:
+            raise ValueError('Self-Flow codec requires embedded VAE architecture')
     return config
+
+
+def recon_resume_params(checkpoint):
+    """Drop external initializers while retaining training compile wrappers."""
+    params = plain(checkpoint['hyper_parameters'])
+    architecture = plain(checkpoint['codec_config'])
+
+    def restore_compile(original, target):
+        if isinstance(original, dict) and isinstance(target, dict):
+            for key, value in original.items():
+                if key == 'compile':
+                    target[key] = value
+                elif key in target:
+                    restore_compile(value, target[key])
+
+    restore_compile(params, architecture)
+    params.update(architecture)
+    return params
 
 
 def canonical_state(state):

@@ -90,6 +90,13 @@ def main(cfg: DictConfig):
         saved = torch.load(source, map_location='cpu', weights_only=False)
         cfg.trainer_module.params = OmegaConf.create(saved['hyper_parameters'])
         del saved
+    elif source and cfg.trainer_module.target == 'ldm.trainer.RepTok':
+        encoder = cfg.trainer_module.params.tokenizer_cfg.params.encoder.target
+        if encoder == 'ldm.self_flow_encoder.FrozenSelfFlowEncoder':
+            from ldm.codec import recon_resume_params
+            saved = torch.load(source, map_location='cpu', weights_only=False)
+            cfg.trainer_module.params = OmegaConf.create(recon_resume_params(saved))
+            del saved
     module = instantiate_from_config(cfg.trainer_module).to(device).train()
     if cfg.trainer_module.target == 'ldm.generation.TokenGenerator':
         cfg.trainer_module.params = OmegaConf.create(module.hyper_parameters)
@@ -163,6 +170,7 @@ def main(cfg: DictConfig):
             metrics, did_step = train_batch(
                 wrapped, batch, optimizer, scheduler, batch_step,
                 params.accumulate_grad_batches, params.gradient_clip_val, device, bf16,
+                error_if_nonfinite=params.get('error_if_nonfinite', False),
             )
             batch_step += 1
             if not did_step:

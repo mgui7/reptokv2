@@ -160,3 +160,42 @@ apptainer exec --cleanenv /e/home/jusers/gui2/jupiter/jenv-video.sif python test
 These compare the token Transformer with the old source, verify frozen codec weights,
 exercise actual small DINO + TAESD constructors with external loading blocked, and
 remove the original recon checkpoint before restoring gen from another directory.
+
+
+## Frozen Self-Flow encoder experiment
+
+`configs/self_flow.yaml` inherits the native RepTok reconstruction configuration.
+It replaces DINO with the public Self-Flow ImageNet SiT-XL/2 backbone (28 blocks),
+freezes it, and averages the 256 raw patch features after block 16 (`blocks[15]`).
+The original Linear + LayerNorm projection remains trainable during reconstruction;
+its output remains the generator target. Its input width changes from 768 to 1152.
+The existing 1152-dimensional decoder and stage-2 generator are unchanged.
+
+Images use the Self-Flow SD-VAE (`stabilityai/sd-vae-ft-ema`) posterior mode,
+scaled by 0.18215. VAE encoding uses float32; Self-Flow follows the training
+BF16 context. We use clean inputs (no added noise), null class 1000, public
+`t=0` / internal SiT `t=1`, and no self-distillation projector. These extraction
+choices are explicit: the public release does not include the paper's complete
+linear-probing recipe. Frozen encoding is chunked at 16 images without changing
+the optimizer batch size. DINO cosine regularization is disabled because that
+trainable DINO feature branch has been replaced. Both encoder and VAE remain
+in eval mode throughout training.
+
+Fresh reconstruction requires `self_flow_checkpoint` and `self_flow_vae` paths.
+Checkpoints embed the VAE architecture and all encoder weights, so reconstruction
+resume and stage-2 loading do not depend on those initialization files. Run
+`python tests/self_flow.py` for upstream feature parity, gradient and portability
+checks. `scripts/self_flow_preflight.py` verifies the released full-size weights
+and layer-16 outputs on real ImageNet inputs in BF16.
+
+`scripts/self_flow_job.sh` captures the Jupiter experiment rooted at
+`/e/scratch/lift-virg/gui2/reptok/self-flow/layer16-20261016`. It runs a four-GPU
+pilot with reconstruction and generator resume checks, then reconstruction to
+300k steps and only then generator training to 100k. Source is snapshotted under
+the run root. Baseline global batches (128 / 512), validation sample count (1024),
+50-step sampling, initialization, optimizer, EMA and data pipelines are retained.
+Each job gracefully checkpoints before 12 hours; continuation is bounded at eight
+reconstruction jobs and four generator jobs. Failed checks stop the chain.
+Pilot metrics use only 64 images and two sampling steps and are not benchmark
+results. `manifest.json`, `jobs.tsv`, `recon.json` and `gen.json` under the run root
+record settings and progress.

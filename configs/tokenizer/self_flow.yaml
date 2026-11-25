@@ -1,0 +1,11 @@
+target: ldm.tokenizer.ClsTokenizer
+params:
+  compile: ${compile}
+  mlp_out_dim: ${oc.select:model.params.net_cfg.params.hidden_size, 1152}
+  encoder:
+    target: ldm.self_flow_encoder.FrozenSelfFlowEncoder
+    params:
+      load_from_ckpt: ${self_flow_checkpoint}
+      vae_pretrained: ${self_flow_vae}
+      layer: 16
+      encode_batch_size: 16

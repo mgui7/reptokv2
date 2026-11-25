@@ -54,10 +54,12 @@ class RepTok(nn.Module):
         self.latent_shape = None
         self.metric_tracker = ImageMetricTracker()
         self.dino_loss_weight = dino_loss_weight
-        teacher_cfg = deepcopy(tokenizer_cfg['params']['encoder'])
-        teacher_cfg['params']['trainable_layers'] = []
-        self.frozen_dino = instantiate_from_config(teacher_cfg)
-        freeze(self.frozen_dino)
+        self.frozen_dino = None
+        if dino_loss_weight != 0:
+            teacher_cfg = deepcopy(tokenizer_cfg['params']['encoder'])
+            teacher_cfg['params']['trainable_layers'] = []
+            self.frozen_dino = instantiate_from_config(teacher_cfg)
+            freeze(self.frozen_dino)
 
     def export_codec_config(self):
         from ldm.codec import codec_config
@@ -87,19 +89,23 @@ class RepTok(nn.Module):
         # cached latents exist. Removing it can change random-number consumption.
         latents = batch.get('latent', self.encode(images))
         tokens = self.tokenizer(images)
-        with torch.no_grad():
-            teacher = self.frozen_dino(images)['cls_token']
-            teacher = torch.cat([teacher], dim=1)
-        similarity = nn.functional.cosine_similarity(tokens['token'], teacher, dim=-1)
-        cosine_loss = self.dino_loss_weight * (1 - similarity).mean()
+        cosine_loss = images.new_zeros(())
+        cosine_metrics = {}
+        if self.frozen_dino is not None:
+            with torch.no_grad():
+                teacher = self.frozen_dino(images)['cls_token']
+                teacher = torch.cat([teacher], dim=1)
+            similarity = nn.functional.cosine_similarity(tokens['token'], teacher, dim=-1)
+            cosine_loss = self.dino_loss_weight * (1 - similarity).mean()
+            cosine_metrics = {'train/cos_sim': similarity.mean().detach(),
+                              'train/cos_sim_loss': cosine_loss.detach()}
         flow_loss = self.model.training_losses(latents, concat_tokens=tokens['proj_token'])
         if self.ema_model is not None:
             # Deliberately before backward/optimizer.step, as in training_step.
             update_ema(self.ema_model, self.model, self.ema_rate)
         return flow_loss + cosine_loss, {
             'train/loss': flow_loss.detach(),
-            'train/cos_sim': similarity.mean().detach(),
-            'train/cos_sim_loss': cosine_loss.detach(),
+            **cosine_metrics,
         }
 
     def reconstruction_batch(self, batch, batch_idx):

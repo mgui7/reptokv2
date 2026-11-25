@@ -60,7 +60,7 @@ def wrap_ddp(module, device):
 
 
 def train_batch(module, batch, optimizer, scheduler, batch_idx, accumulation,
-                clip_norm, device, use_bf16=False):
+                clip_norm, device, use_bf16=False, error_if_nonfinite=False):
     """Match Lightning's closure: forward -> scheduler -> zero_grad -> backward."""
     step = (batch_idx + 1) % accumulation == 0
     context = module.no_sync() if hasattr(module, 'no_sync') and not step else nullcontext()
@@ -73,11 +73,14 @@ def train_batch(module, batch, optimizer, scheduler, batch_idx, accumulation,
             loss = loss / accumulation
         if batch_idx % accumulation == 0:
             optimizer.zero_grad(set_to_none=True)
+        if error_if_nonfinite and not torch.isfinite(loss):
+            raise FloatingPointError('Non-finite training loss')
         loss.backward()
     if step:
         if clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(
                 [p for p in module.parameters() if p.requires_grad], clip_norm,
+                error_if_nonfinite=error_if_nonfinite,
             )
         optimizer.step()
     return metrics, step

@@ -4,6 +4,7 @@ torch
 torchvision
 timm
 transformers
+diffusers
 hydra-core
 omegaconf
 webdataset
